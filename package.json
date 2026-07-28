@@ -15,6 +15,7 @@
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2",
     "earcut": "^3.2.3",
+    "lucide-react": "^1.27.0",
     "pdfjs-dist": "^6.1.200",
     "perfect-freehand": "^1.2.3",
     "pixi-viewport": "^6.0.3",

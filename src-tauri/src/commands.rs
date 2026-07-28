@@ -110,7 +110,7 @@ pub fn create_notebook(
         "id": first_page_id,
         "width": 1653.0,
         "height": 2339.0,
-        "template": { "kind": "blank" },
+        "template": { "kind": "grid" },
         "pdfRef": null,
         "strokes": [],
         "textObjects": [],

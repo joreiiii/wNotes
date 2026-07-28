@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { Texture } from "pixi.js";
@@ -12,30 +12,46 @@ import { createBlankPage, createPdfPages } from "../engine/pageFactory";
 import { loadPdfDocument, renderPdfPageToCanvas } from "../engine/pdf/pdfRender";
 import { loadImageElement } from "../engine/imageLoad";
 import { useToolStore } from "../state/toolStore";
-import type { NotebookManifest, SelectionRef } from "../types";
+import type { NotebookManifest, PageTemplateKind, SelectionRef } from "../types";
 
 export interface EditorViewProps {
   notebookId: string;
-  onClose: () => void;
+  initialPageId: string | null;
+  onPageChange: (pageId: string) => void;
+  onHistoryChange: (canUndo: boolean, canRedo: boolean) => void;
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
 }
 
-export default function EditorView({ notebookId, onClose }: EditorViewProps) {
+export interface EditorViewHandle {
+  undo: () => void;
+  redo: () => void;
+}
+
+const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function EditorView(
+  { notebookId, initialPageId, onPageChange, onHistoryChange, sidebarOpen, onToggleSidebar },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<PageEngine | null>(null);
   const saveTimerRef = useRef<number | null>(null);
 
   const [manifest, setManifest] = useState<NotebookManifest | null>(null);
-  const [pageId, setPageId] = useState<string | null>(null);
+  const [pageId, setPageId] = useState<string | null>(initialPageId);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [selection, setSelection] = useState<SelectionRef[]>([]);
-  const [canUndo, setCanUndo] = useState(false);
-  const [canRedo, setCanRedo] = useState(false);
   const [textEditTarget, setTextEditTarget] = useState<TextEditTarget | null>(null);
+  const [pageStripVisible, setPageStripVisible] = useState(true);
 
   const tool = useToolStore((s) => s.tool);
   const color = useToolStore((s) => s.color);
   const width = useToolStore((s) => s.width);
   const shapeMode = useToolStore((s) => s.shapeMode);
+
+  useImperativeHandle(ref, () => ({
+    undo: () => engineRef.current?.history.undo(),
+    redo: () => engineRef.current?.history.redo(),
+  }));
 
   // Load the notebook manifest once.
   useEffect(() => {
@@ -44,12 +60,22 @@ export default function EditorView({ notebookId, onClose }: EditorViewProps) {
       const m = await commands.getNotebookManifest(notebookId);
       if (cancelled) return;
       setManifest(m);
-      setPageId(m.pageOrder[0] ?? null);
+      setPageId((current) => current ?? m.pageOrder[0] ?? null);
     })();
     return () => {
       cancelled = true;
     };
   }, [notebookId]);
+
+  const onPageChangeRef = useRef(onPageChange);
+  onPageChangeRef.current = onPageChange;
+
+  useEffect(() => {
+    if (pageId) onPageChangeRef.current(pageId);
+    // Intentionally only reacts to pageId changes — onPageChange's identity can
+    // churn on unrelated parent re-renders and must not re-trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageId]);
 
   const scheduleSave = useCallback(() => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
@@ -105,11 +131,9 @@ export default function EditorView({ notebookId, onClose }: EditorViewProps) {
         return;
       }
       engine.history.setOnChange(() => {
-        setCanUndo(engine.history.canUndo());
-        setCanRedo(engine.history.canRedo());
+        onHistoryChange(engine.history.canUndo(), engine.history.canRedo());
       });
-      setCanUndo(false);
-      setCanRedo(false);
+      onHistoryChange(false, false);
       setSelection([]);
       engine.setTool(tool);
       engine.setColor(color);
@@ -142,6 +166,7 @@ export default function EditorView({ notebookId, onClose }: EditorViewProps) {
       engineRef.current?.destroy();
       engineRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notebookId, pageId, scheduleSave]);
 
   useEffect(() => engineRef.current?.setTool(tool), [tool]);
@@ -154,25 +179,27 @@ export default function EditorView({ notebookId, onClose }: EditorViewProps) {
   const setWidth = useToolStore((s) => s.setWidth);
   const setShapeMode = useToolStore((s) => s.setShapeMode);
 
-  const updateManifest = useCallback(
-    async (next: NotebookManifest) => {
-      setManifest(next);
-      await commands.saveNotebookManifest(next);
-    },
-    [],
-  );
+  const updateManifest = useCallback(async (next: NotebookManifest) => {
+    setManifest(next);
+    await commands.saveNotebookManifest(next);
+  }, []);
 
-  const handleAddPage = useCallback(async () => {
-    if (!manifest) return;
-    const template = engineRef.current?.getPageData().template ?? { kind: "blank" as const };
-    const page = createBlankPage(template);
-    await commands.savePage(notebookId, page.id, page);
-    const idx = manifest.pageOrder.indexOf(pageId ?? "");
-    const pageOrder = [...manifest.pageOrder];
-    pageOrder.splice(idx + 1, 0, page.id);
-    await updateManifest({ ...manifest, pageOrder, modifiedAt: new Date().toISOString() });
-    setPageId(page.id);
-  }, [manifest, notebookId, pageId, updateManifest]);
+  const handleAddPage = useCallback(
+    async (templateKind?: PageTemplateKind) => {
+      if (!manifest) return;
+      const template = templateKind
+        ? { kind: templateKind }
+        : (engineRef.current?.getPageData().template ?? { kind: "grid" as const });
+      const page = createBlankPage(template);
+      await commands.savePage(notebookId, page.id, page);
+      const idx = manifest.pageOrder.indexOf(pageId ?? "");
+      const pageOrder = [...manifest.pageOrder];
+      pageOrder.splice(idx + 1, 0, page.id);
+      await updateManifest({ ...manifest, pageOrder, modifiedAt: new Date().toISOString() });
+      setPageId(page.id);
+    },
+    [manifest, notebookId, pageId, updateManifest],
+  );
 
   const handleDeletePage = useCallback(
     async (id: string) => {
@@ -239,10 +266,12 @@ export default function EditorView({ notebookId, onClose }: EditorViewProps) {
   }));
 
   return (
-    <div className="editor-view">
+    <div className="app-shell-main">
       <Toolbar
-        title={manifest?.title ?? ""}
-        onBack={onClose}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={onToggleSidebar}
+        pageStripVisible={pageStripVisible}
+        onTogglePageStrip={() => setPageStripVisible((v) => !v)}
         tool={tool}
         onToolChange={setTool}
         color={color}
@@ -251,16 +280,12 @@ export default function EditorView({ notebookId, onClose }: EditorViewProps) {
         onWidthChange={setWidth}
         shapeMode={shapeMode}
         onShapeModeChange={setShapeMode}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        onUndo={() => engineRef.current?.history.undo()}
-        onRedo={() => engineRef.current?.history.redo()}
         hasSelection={selection.length > 0}
         onDeleteSelection={() => engineRef.current?.deleteSelection()}
         onDuplicateSelection={() => engineRef.current?.duplicateSelection()}
         onCopySelection={() => engineRef.current?.copySelection()}
         onPasteSelection={() => engineRef.current?.pasteClipboard()}
-        onAddPage={handleAddPage}
+        onAddPage={() => handleAddPage()}
         onImportPdf={handleImportPdf}
         onImportImage={handleImportImage}
       />
@@ -275,15 +300,20 @@ export default function EditorView({ notebookId, onClose }: EditorViewProps) {
             }}
           />
         </div>
-        <PageThumbnailStrip
-          pages={thumbnailEntries}
-          currentPageId={pageId}
-          onSelect={setPageId}
-          onDelete={handleDeletePage}
-          onMoveUp={(id) => handleMove(id, -1)}
-          onMoveDown={(id) => handleMove(id, 1)}
-        />
+        {pageStripVisible && (
+          <PageThumbnailStrip
+            pages={thumbnailEntries}
+            currentPageId={pageId}
+            onSelect={setPageId}
+            onDelete={handleDeletePage}
+            onMoveUp={(id) => handleMove(id, -1)}
+            onMoveDown={(id) => handleMove(id, 1)}
+            onAddPage={handleAddPage}
+          />
+        )}
       </div>
     </div>
   );
-}
+});
+
+export default EditorView;

@@ -6,10 +6,10 @@ export function buildTemplateTexture(template: PageTemplate, width: number, heig
   canvas.width = Math.round(width);
   canvas.height = Math.round(height);
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = "#f6f0e1";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  const lineColor = template.color ?? "#c7d2e0";
+  const lineColor = template.color ?? "#ddd2b3";
   const spacing = 40;
 
   switch (template.kind) {

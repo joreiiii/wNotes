@@ -1,11 +1,12 @@
 import { useEffect } from "react";
+import { Folder, FolderPlus, NotebookPen, Plus } from "lucide-react";
 import { useLibraryStore } from "../state/libraryStore";
 
-export interface LibraryViewProps {
-  onOpenNotebook: (notebookId: string) => void;
+export interface HomeViewProps {
+  onOpenNotebook: (notebookId: string, title: string) => void;
 }
 
-export default function LibraryView({ onOpenNotebook }: LibraryViewProps) {
+export default function HomeView({ onOpenNotebook }: HomeViewProps) {
   const { index, currentFolderId, loading, refresh, setCurrentFolder, createFolder, createNotebook, renameFolder, renameNotebook, deleteFolder, deleteNotebook } =
     useLibraryStore();
 
@@ -16,10 +17,11 @@ export default function LibraryView({ onOpenNotebook }: LibraryViewProps) {
   const folders = index.folders.filter((f) => f.parentId === currentFolderId);
   const notebooks = index.notebooks.filter((n) => n.parentId === currentFolderId);
   const currentFolder = index.folders.find((f) => f.id === currentFolderId) ?? null;
+  const notebookCount = (folderId: string) => index.notebooks.filter((n) => n.parentId === folderId).length;
 
   return (
-    <div className="library-view">
-      <div className="library-header">
+    <div className="home-view">
+      <div className="home-header">
         {currentFolder ? (
           <button className="tool-btn" onClick={() => setCurrentFolder(currentFolder.parentId)}>
             ← {currentFolder.title}
@@ -35,27 +37,27 @@ export default function LibraryView({ onOpenNotebook }: LibraryViewProps) {
             if (title) await createFolder(title);
           }}
         >
-          + Ordner
+          <FolderPlus size={16} /> Ordner
         </button>
         <button
           className="tool-btn"
           onClick={async () => {
             const title = window.prompt("Notizbuchname", "Neues Notizbuch") ?? "Neues Notizbuch";
             const id = await createNotebook(title);
-            onOpenNotebook(id);
+            onOpenNotebook(id, title);
           }}
         >
-          + Notizbuch
+          <Plus size={16} /> Notizbuch
         </button>
       </div>
 
       {loading && <p className="hint">Lade Bibliothek…</p>}
 
-      <div className="library-grid">
+      <div className="home-grid">
         {folders.map((f) => (
-          <div
+          <button
             key={f.id}
-            className="library-item folder"
+            className="home-item"
             onClick={() => setCurrentFolder(f.id)}
             onContextMenu={async (e) => {
               e.preventDefault();
@@ -68,15 +70,16 @@ export default function LibraryView({ onOpenNotebook }: LibraryViewProps) {
               }
             }}
           >
-            <div className="folder-icon">📁</div>
-            <div className="library-item-title">{f.title}</div>
-          </div>
+            <Folder size={36} className="home-item-icon" />
+            <div className="home-item-title">{f.title}</div>
+            <div className="sidebar-item-count">{notebookCount(f.id)}</div>
+          </button>
         ))}
         {notebooks.map((n) => (
-          <div
+          <button
             key={n.id}
-            className="library-item notebook"
-            onClick={() => onOpenNotebook(n.id)}
+            className="home-item"
+            onClick={() => onOpenNotebook(n.id, n.title)}
             onContextMenu={async (e) => {
               e.preventDefault();
               const action = window.prompt("umbenennen (u) oder löschen (l)?");
@@ -88,9 +91,9 @@ export default function LibraryView({ onOpenNotebook }: LibraryViewProps) {
               }
             }}
           >
-            <div className="notebook-icon">📓</div>
-            <div className="library-item-title">{n.title}</div>
-          </div>
+            <NotebookPen size={36} className="home-item-icon" />
+            <div className="home-item-title">{n.title}</div>
+          </button>
         ))}
         {folders.length === 0 && notebooks.length === 0 && !loading && (
           <p className="hint">Noch keine Notizbücher. Leg mit „+ Notizbuch“ los.</p>

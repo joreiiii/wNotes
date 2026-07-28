@@ -1,15 +1,8 @@
-import { useState } from "react";
-import LibraryView from "./components/LibraryView";
-import EditorView from "./components/EditorView";
+import AppShell from "./components/AppShell";
 import "./App.css";
 
 function App() {
-  const [openNotebookId, setOpenNotebookId] = useState<string | null>(null);
-
-  if (openNotebookId) {
-    return <EditorView notebookId={openNotebookId} onClose={() => setOpenNotebookId(null)} />;
-  }
-  return <LibraryView onOpenNotebook={setOpenNotebookId} />;
+  return <AppShell />;
 }
 
 export default App;
