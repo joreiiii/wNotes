@@ -2,7 +2,6 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { Texture } from "pixi.js";
-import Toolbar from "./Toolbar";
 import PageCanvas from "./PageCanvas";
 import PageThumbnailStrip, { type ThumbnailEntry } from "./PageThumbnailStrip";
 import TextEditOverlay, { type TextEditTarget } from "./TextEditOverlay";
@@ -19,17 +18,25 @@ export interface EditorViewProps {
   initialPageId: string | null;
   onPageChange: (pageId: string) => void;
   onHistoryChange: (canUndo: boolean, canRedo: boolean) => void;
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
+  onSelectionChange: (hasSelection: boolean) => void;
+  pageStripVisible: boolean;
 }
 
+/** Imperative surface the shell's full-width toolbar drives. */
 export interface EditorViewHandle {
   undo: () => void;
   redo: () => void;
+  deleteSelection: () => void;
+  duplicateSelection: () => void;
+  copySelection: () => void;
+  pasteSelection: () => void;
+  addPage: () => void;
+  importPdf: () => void;
+  importImage: () => void;
 }
 
 const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function EditorView(
-  { notebookId, initialPageId, onPageChange, onHistoryChange, sidebarOpen, onToggleSidebar },
+  { notebookId, initialPageId, onPageChange, onHistoryChange, onSelectionChange, pageStripVisible },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -39,19 +46,19 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
   const [manifest, setManifest] = useState<NotebookManifest | null>(null);
   const [pageId, setPageId] = useState<string | null>(initialPageId);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
-  const [selection, setSelection] = useState<SelectionRef[]>([]);
   const [textEditTarget, setTextEditTarget] = useState<TextEditTarget | null>(null);
-  const [pageStripVisible, setPageStripVisible] = useState(true);
 
   const tool = useToolStore((s) => s.tool);
   const color = useToolStore((s) => s.color);
   const width = useToolStore((s) => s.width);
   const shapeMode = useToolStore((s) => s.shapeMode);
 
-  useImperativeHandle(ref, () => ({
-    undo: () => engineRef.current?.history.undo(),
-    redo: () => engineRef.current?.history.redo(),
-  }));
+  const onPageChangeRef = useRef(onPageChange);
+  onPageChangeRef.current = onPageChange;
+  const onHistoryChangeRef = useRef(onHistoryChange);
+  onHistoryChangeRef.current = onHistoryChange;
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
 
   // Load the notebook manifest once.
   useEffect(() => {
@@ -67,12 +74,9 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
     };
   }, [notebookId]);
 
-  const onPageChangeRef = useRef(onPageChange);
-  onPageChangeRef.current = onPageChange;
-
   useEffect(() => {
     if (pageId) onPageChangeRef.current(pageId);
-    // Intentionally only reacts to pageId changes — onPageChange's identity can
+    // Intentionally only reacts to pageId changes — the callback's identity can
     // churn on unrelated parent re-renders and must not re-trigger this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageId]);
@@ -112,7 +116,7 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
         container: containerRef.current,
         page: data,
         onChange: scheduleSave,
-        onSelectionChange: setSelection,
+        onSelectionChange: (sel: SelectionRef[]) => onSelectionChangeRef.current(sel.length > 0),
         onRequestTextEdit: (obj, screenX, screenY) => {
           const rect = containerRef.current!.getBoundingClientRect();
           setTextEditTarget({
@@ -131,10 +135,10 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
         return;
       }
       engine.history.setOnChange(() => {
-        onHistoryChange(engine.history.canUndo(), engine.history.canRedo());
+        onHistoryChangeRef.current(engine.history.canUndo(), engine.history.canRedo());
       });
-      onHistoryChange(false, false);
-      setSelection([]);
+      onHistoryChangeRef.current(false, false);
+      onSelectionChangeRef.current(false);
       engine.setTool(tool);
       engine.setColor(color);
       engine.setWidth(width);
@@ -173,11 +177,6 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
   useEffect(() => engineRef.current?.setColor(color), [color]);
   useEffect(() => engineRef.current?.setWidth(width), [width]);
   useEffect(() => engineRef.current?.setShapeMode(shapeMode), [shapeMode]);
-
-  const setTool = useToolStore((s) => s.setTool);
-  const setColor = useToolStore((s) => s.setColor);
-  const setWidth = useToolStore((s) => s.setWidth);
-  const setShapeMode = useToolStore((s) => s.setShapeMode);
 
   const updateManifest = useCallback(async (next: NotebookManifest) => {
     setManifest(next);
@@ -260,58 +259,46 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
     await engine.addImageObjectFromBytes(bytes, storedName);
   }, [notebookId]);
 
+  useImperativeHandle(ref, () => ({
+    undo: () => engineRef.current?.history.undo(),
+    redo: () => engineRef.current?.history.redo(),
+    deleteSelection: () => engineRef.current?.deleteSelection(),
+    duplicateSelection: () => engineRef.current?.duplicateSelection(),
+    copySelection: () => engineRef.current?.copySelection(),
+    pasteSelection: () => engineRef.current?.pasteClipboard(),
+    addPage: () => handleAddPage(),
+    importPdf: () => handleImportPdf(),
+    importImage: () => handleImportImage(),
+  }));
+
   const thumbnailEntries: ThumbnailEntry[] = (manifest?.pageOrder ?? []).map((id) => ({
     id,
     url: thumbnails[id] ?? null,
   }));
 
   return (
-    <div className="app-shell-main">
-      <Toolbar
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={onToggleSidebar}
-        pageStripVisible={pageStripVisible}
-        onTogglePageStrip={() => setPageStripVisible((v) => !v)}
-        tool={tool}
-        onToolChange={setTool}
-        color={color}
-        onColorChange={setColor}
-        width={width}
-        onWidthChange={setWidth}
-        shapeMode={shapeMode}
-        onShapeModeChange={setShapeMode}
-        hasSelection={selection.length > 0}
-        onDeleteSelection={() => engineRef.current?.deleteSelection()}
-        onDuplicateSelection={() => engineRef.current?.duplicateSelection()}
-        onCopySelection={() => engineRef.current?.copySelection()}
-        onPasteSelection={() => engineRef.current?.pasteClipboard()}
-        onAddPage={() => handleAddPage()}
-        onImportPdf={handleImportPdf}
-        onImportImage={handleImportImage}
-      />
-      <div className="editor-body">
-        <div className="editor-canvas-wrap">
-          <PageCanvas ref={containerRef} />
-          <TextEditOverlay
-            target={textEditTarget}
-            onCommit={(id, text, fontSize, col) => {
-              engineRef.current?.commitTextEdit(id, text, fontSize, col);
-              setTextEditTarget(null);
-            }}
-          />
-        </div>
-        {pageStripVisible && (
-          <PageThumbnailStrip
-            pages={thumbnailEntries}
-            currentPageId={pageId}
-            onSelect={setPageId}
-            onDelete={handleDeletePage}
-            onMoveUp={(id) => handleMove(id, -1)}
-            onMoveDown={(id) => handleMove(id, 1)}
-            onAddPage={handleAddPage}
-          />
-        )}
+    <div className="editor-surface">
+      <div className="editor-canvas-wrap">
+        <PageCanvas ref={containerRef} />
+        <TextEditOverlay
+          target={textEditTarget}
+          onCommit={(id, text, fontSize, col) => {
+            engineRef.current?.commitTextEdit(id, text, fontSize, col);
+            setTextEditTarget(null);
+          }}
+        />
       </div>
+      {pageStripVisible && (
+        <PageThumbnailStrip
+          pages={thumbnailEntries}
+          currentPageId={pageId}
+          onSelect={setPageId}
+          onDelete={handleDeletePage}
+          onMoveUp={(id) => handleMove(id, -1)}
+          onMoveDown={(id) => handleMove(id, 1)}
+          onAddPage={handleAddPage}
+        />
+      )}
     </div>
   );
 });

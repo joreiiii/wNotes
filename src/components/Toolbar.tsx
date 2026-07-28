@@ -12,6 +12,7 @@ import {
   Pen,
   PanelLeft,
   Plus,
+  Search,
   Shapes,
   Trash2,
   Type,
@@ -24,6 +25,7 @@ export interface ToolbarProps {
   onToggleSidebar: () => void;
   pageStripVisible: boolean;
   onTogglePageStrip: () => void;
+  onSearch: () => void;
   tool: ToolId;
   onToolChange: (tool: ToolId) => void;
   color: string;
@@ -41,6 +43,8 @@ export interface ToolbarProps {
   onImportPdf: () => void;
   onImportImage: () => void;
 }
+
+const ICON = 22;
 
 const DRAW_TOOLS: { id: ToolId; label: string; icon: typeof Pen }[] = [
   { id: "pen", label: "Stift", icon: Pen },
@@ -67,114 +71,129 @@ export default function Toolbar(props: ToolbarProps) {
 
   return (
     <div className="toolbar">
-      <button
-        className={"icon-btn" + (props.sidebarOpen ? " active" : "")}
-        onClick={props.onToggleSidebar}
-        aria-label="Seitenleiste"
-      >
-        <PanelLeft size={18} />
-      </button>
-      <button
-        className={"icon-btn" + (props.pageStripVisible ? " active" : "")}
-        onClick={props.onTogglePageStrip}
-        aria-label="Seitenübersicht"
-      >
-        <LayoutGrid size={18} />
-      </button>
-
-      <div className="toolbar-divider" />
-
-      {DRAW_TOOLS.map((t) => (
+      <div className="toolbar-group">
         <button
-          key={t.id}
-          className={"icon-btn" + (props.tool === t.id ? " active" : "")}
-          onClick={() => props.onToolChange(t.id)}
-          aria-label={t.label}
-          title={t.label}
+          className={"icon-btn" + (props.sidebarOpen ? " active" : "")}
+          onClick={props.onToggleSidebar}
+          aria-label="Seitenleiste"
+          title="Seitenleiste"
         >
-          <t.icon size={18} />
+          <PanelLeft size={ICON} />
         </button>
-      ))}
+        <button className="icon-btn" onClick={props.onSearch} aria-label="Suchen" title="Suchen">
+          <Search size={ICON} />
+        </button>
+        <button
+          className={"icon-btn" + (props.pageStripVisible ? " active" : "")}
+          onClick={props.onTogglePageStrip}
+          aria-label="Seitenübersicht"
+          title="Seitenübersicht"
+        >
+          <LayoutGrid size={ICON} />
+        </button>
+      </div>
 
-      {(props.tool === "pen" || props.tool === "marker") && (
-        <div className="color-popover-wrap" ref={popoverRef}>
+      <div className="toolbar-spacer" />
+
+      <div className="toolbar-group toolbar-tools">
+        {DRAW_TOOLS.map((t) => (
           <button
-            className="color-trigger"
-            style={{ background: props.color }}
-            onClick={() => setColorPopoverOpen((v) => !v)}
-            aria-label="Farbe"
-          />
-          {colorPopoverOpen && (
-            <div className="color-popover">
-              <div className="color-swatch-row">
-                {palette.map((c) => (
-                  <button
-                    key={c}
-                    className={"color-swatch" + (props.color === c ? " active" : "")}
-                    style={{ background: c }}
-                    onClick={() => props.onColorChange(c)}
-                  />
-                ))}
+            key={t.id}
+            className={"icon-btn" + (props.tool === t.id ? " active" : "")}
+            onClick={() => props.onToolChange(t.id)}
+            aria-label={t.label}
+            title={t.label}
+          >
+            <t.icon size={ICON} />
+          </button>
+        ))}
+
+        {(props.tool === "pen" || props.tool === "marker") && (
+          <div className="color-popover-wrap" ref={popoverRef}>
+            <button
+              className="color-trigger"
+              style={{ background: props.color }}
+              onClick={() => setColorPopoverOpen((v) => !v)}
+              aria-label="Farbe"
+              title="Farbe & Strichstärke"
+            />
+            {colorPopoverOpen && (
+              <div className="color-popover">
+                <div className="color-swatch-row">
+                  {palette.map((c) => (
+                    <button
+                      key={c}
+                      className={"color-swatch" + (props.color === c ? " active" : "")}
+                      style={{ background: c }}
+                      onClick={() => props.onColorChange(c)}
+                    />
+                  ))}
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={20}
+                  value={props.width}
+                  onChange={(e) => props.onWidthChange(Number(e.target.value))}
+                />
               </div>
-              <input
-                type="range"
-                min={1}
-                max={20}
-                value={props.width}
-                onChange={(e) => props.onWidthChange(Number(e.target.value))}
-              />
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
 
-      <button
-        className={"icon-btn" + (props.tool === "text" ? " active" : "")}
-        onClick={() => props.onToolChange("text")}
-        aria-label="Text"
-        title="Text"
-      >
-        <Type size={18} />
-      </button>
-      <button className="icon-btn" onClick={props.onImportImage} aria-label="Bild einfügen" title="Bild einfügen">
-        <ImageIcon size={18} />
-      </button>
-      <button
-        className={"icon-btn" + (props.shapeMode ? " active" : "")}
-        onClick={() => props.onShapeModeChange(!props.shapeMode)}
-        aria-label="Formen erkennen"
-        title="Formen erkennen"
-      >
-        <Shapes size={18} />
-      </button>
+        <button
+          className={"icon-btn" + (props.tool === "text" ? " active" : "")}
+          onClick={() => props.onToolChange("text")}
+          aria-label="Text"
+          title="Text"
+        >
+          <Type size={ICON} />
+        </button>
+        <button className="icon-btn" onClick={props.onImportImage} aria-label="Bild einfügen" title="Bild einfügen">
+          <ImageIcon size={ICON} />
+        </button>
+        <button
+          className={"icon-btn" + (props.shapeMode ? " active" : "")}
+          onClick={() => props.onShapeModeChange(!props.shapeMode)}
+          aria-label="Formen erkennen"
+          title="Formen erkennen"
+        >
+          <Shapes size={ICON} />
+        </button>
+      </div>
 
-      <div className="toolbar-divider" />
       <div className="toolbar-spacer" />
 
       {props.hasSelection && (
-        <>
+        <div className="toolbar-group">
           <button className="icon-btn" onClick={props.onCopySelection} aria-label="Kopieren" title="Kopieren">
-            <Copy size={18} />
+            <Copy size={ICON} />
           </button>
           <button className="icon-btn" onClick={props.onPasteSelection} aria-label="Einfügen" title="Einfügen">
-            <Clipboard size={18} />
+            <Clipboard size={ICON} />
           </button>
-          <button className="icon-btn" onClick={props.onDuplicateSelection} aria-label="Duplizieren" title="Duplizieren">
-            <CopyPlus size={18} />
+          <button
+            className="icon-btn"
+            onClick={props.onDuplicateSelection}
+            aria-label="Duplizieren"
+            title="Duplizieren"
+          >
+            <CopyPlus size={ICON} />
           </button>
           <button className="icon-btn" onClick={props.onDeleteSelection} aria-label="Löschen" title="Löschen">
-            <Trash2 size={18} />
+            <Trash2 size={ICON} />
           </button>
-          <div className="toolbar-divider" />
-        </>
+        </div>
       )}
 
-      <button className="icon-btn" onClick={props.onImportPdf} aria-label="PDF importieren" title="PDF importieren">
-        <FileUp size={18} />
-      </button>
-      <button className="icon-btn" onClick={props.onAddPage} aria-label="Seite hinzufügen" title="Seite hinzufügen">
-        <Plus size={18} />
-      </button>
+      <div className="toolbar-group toolbar-group-boxed">
+        <button className="icon-btn" onClick={props.onImportPdf} aria-label="PDF importieren" title="PDF importieren">
+          <FileUp size={ICON} />
+        </button>
+        <button className="icon-btn" onClick={props.onAddPage} aria-label="Seite hinzufügen" title="Seite hinzufügen">
+          <Plus size={ICON} />
+        </button>
+      </div>
     </div>
   );
 }

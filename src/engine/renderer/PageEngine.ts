@@ -18,7 +18,7 @@ import { recognizeShape, shapeToPoints } from "../stroke/shapeRecognition";
 import { pointInPolygon, unionBounds } from "../selection/hitTest";
 import { applyAffineToPoint } from "../selection/transform";
 import { getClipboard, setClipboard } from "../selection/clipboard";
-import { buildTemplateTexture } from "./templates";
+import { drawTemplate } from "./templates";
 import { loadImageElement } from "../imageLoad";
 
 const MARKER_ALPHA = 0.35;
@@ -44,6 +44,7 @@ export class PageEngine {
 
   private container: HTMLDivElement;
   private backgroundLayer = new Container();
+  private backgroundGraphics = new Graphics();
   private pdfLayer = new Container();
   private inkLayer = new Container();
   private objectLayer = new Container();
@@ -104,7 +105,8 @@ export class PageEngine {
     await this.app.init({
       width: Math.max(rect.width, 100),
       height: Math.max(rect.height, 100),
-      background: "#e9edf2",
+      // Transparent so the themed surround from CSS shows around the sheet.
+      backgroundAlpha: 0,
       antialias: true,
       resolution: Math.min(window.devicePixelRatio || 1, 2),
       autoDensity: true,
@@ -124,16 +126,16 @@ export class PageEngine {
       .drag()
       .pinch()
       .wheel()
-      .clampZoom({ minScale: 0.2, maxScale: 6 });
+      .clampZoom({ minScale: 0.1, maxScale: 8 });
 
+    this.backgroundLayer.addChild(this.backgroundGraphics);
     this.viewport.addChild(this.backgroundLayer, this.pdfLayer, this.inkLayer, this.objectLayer, this.overlayLayer);
     this.viewport.eventMode = "static";
     this.viewport.hitArea = new Rectangle(-2000, -2000, this.page.width + 4000, this.page.height + 4000);
 
-    this.renderBackground();
     this.renderAllStrokes();
     this.renderAllObjects();
-    this.centerView();
+    this.fitWidth();
     this.applyToolMode();
 
     this.viewport.on("pointerdown", this.onPointerDown);
@@ -141,37 +143,49 @@ export class PageEngine {
     this.viewport.on("pointerup", this.onPointerUp);
     this.viewport.on("pointerupoutside", this.onPointerUp);
     this.viewport.on("moved", this.onViewportChange);
-    this.viewport.on("zoomed", this.onViewportChange);
+    this.viewport.on("zoomed", this.onZoomed);
 
     window.addEventListener("resize", this.handleResize);
     this.handleResize();
+    this.fitWidth();
   }
 
   whenReady(): Promise<void> {
     return this.ready;
   }
 
+  private onZoomed = () => {
+    this.renderBackground();
+    this.onViewportChange();
+  };
+
   private handleResize = () => {
     const rect = this.container.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return;
     this.app.renderer.resize(rect.width, rect.height);
     this.viewport.resize(rect.width, rect.height);
+    this.renderBackground();
   };
 
-  private centerView() {
-    this.viewport.fit(true, this.page.width, this.page.height);
-    this.viewport.moveCenter(this.page.width / 2, this.page.height / 2);
+  /** Matches the reference layout: the sheet spans the full viewport width and scrolls vertically. */
+  private fitWidth() {
+    const scale = this.viewport.screenWidth / this.page.width;
+    this.viewport.scale.set(scale);
+    this.viewport.moveCorner(0, 0);
+    this.renderBackground();
   }
 
   // ---------- background / template / pdf ----------
 
-  private renderBackground() {
-    this.backgroundLayer.removeChildren();
-    const texture = buildTemplateTexture(this.page.template, this.page.width, this.page.height);
-    const sprite = new Sprite(texture);
-    sprite.width = this.page.width;
-    sprite.height = this.page.height;
-    this.backgroundLayer.addChild(sprite);
+  private renderBackground(scaleOverride?: number) {
+    const scale = scaleOverride ?? this.viewport.scale.x;
+    drawTemplate(
+      this.backgroundGraphics,
+      this.page.template,
+      this.page.width,
+      this.page.height,
+      1 / Math.max(scale, 0.0001),
+    );
   }
 
   setPdfBackground(canvas: HTMLCanvasElement | null) {
@@ -971,12 +985,14 @@ export class PageEngine {
     const scale = maxWidth / this.page.width;
     this.viewport.position.set(0, 0);
     this.viewport.scale.set(scale, scale);
+    this.renderBackground(scale);
 
     const canvas = this.app.renderer.extract.canvas(this.viewport) as HTMLCanvasElement;
 
     this.overlayLayer.visible = overlayVisible;
     this.viewport.position.set(prev.x, prev.y);
     this.viewport.scale.set(prev.sx, prev.sy);
+    this.renderBackground();
 
     return await new Promise<Uint8Array>((resolve, reject) => {
       canvas.toBlob((blob) => {

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import TabBar from "./TabBar";
+import Toolbar from "./Toolbar";
 import Sidebar from "./Sidebar";
 import HomeView from "./HomeView";
 import EditorView, { type EditorViewHandle } from "./EditorView";
 import SettingsPanel from "./SettingsPanel";
 import { useTabsStore } from "../state/tabsStore";
 import { useSettingsStore } from "../state/settingsStore";
+import { useToolStore } from "../state/toolStore";
 
 export default function AppShell() {
   const tabs = useTabsStore((s) => s.tabs);
@@ -16,13 +18,25 @@ export default function AppShell() {
 
   const theme = useSettingsStore((s) => s.theme);
 
+  const tool = useToolStore((s) => s.tool);
+  const color = useToolStore((s) => s.color);
+  const width = useToolStore((s) => s.width);
+  const shapeMode = useToolStore((s) => s.shapeMode);
+  const setTool = useToolStore((s) => s.setTool);
+  const setColor = useToolStore((s) => s.setColor);
+  const setWidth = useToolStore((s) => s.setWidth);
+  const setShapeMode = useToolStore((s) => s.setShapeMode);
+
   const [showHome, setShowHome] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [pageStripVisible, setPageStripVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [hasSelection, setHasSelection] = useState(false);
 
   const editorRef = useRef<EditorViewHandle | null>(null);
+  const searchFocusRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -59,7 +73,6 @@ export default function AppShell() {
   );
 
   const showEditor = !showHome && !!activeTab;
-  const showSidebar = sidebarOpen && showEditor;
 
   return (
     <div className="app-shell">
@@ -69,8 +82,38 @@ export default function AppShell() {
         onSelectTab={handleSelectTab}
         isHome={showHome}
       />
+
+      {showEditor && (
+        <Toolbar
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
+          pageStripVisible={pageStripVisible}
+          onTogglePageStrip={() => setPageStripVisible((v) => !v)}
+          onSearch={() => {
+            setSidebarOpen(true);
+            requestAnimationFrame(() => searchFocusRef.current?.());
+          }}
+          tool={tool}
+          onToolChange={setTool}
+          color={color}
+          onColorChange={setColor}
+          width={width}
+          onWidthChange={setWidth}
+          shapeMode={shapeMode}
+          onShapeModeChange={setShapeMode}
+          hasSelection={hasSelection}
+          onDeleteSelection={() => editorRef.current?.deleteSelection()}
+          onDuplicateSelection={() => editorRef.current?.duplicateSelection()}
+          onCopySelection={() => editorRef.current?.copySelection()}
+          onPasteSelection={() => editorRef.current?.pasteSelection()}
+          onAddPage={() => editorRef.current?.addPage()}
+          onImportPdf={() => editorRef.current?.importPdf()}
+          onImportImage={() => editorRef.current?.importImage()}
+        />
+      )}
+
       <div className="app-shell-body">
-        {showSidebar && (
+        {sidebarOpen && (
           <Sidebar
             onOpenNotebook={openNotebook}
             onOpenSettings={() => setSettingsOpen(true)}
@@ -78,6 +121,9 @@ export default function AppShell() {
             canRedo={canRedo}
             onUndo={() => editorRef.current?.undo()}
             onRedo={() => editorRef.current?.redo()}
+            registerSearchFocus={(fn) => {
+              searchFocusRef.current = fn;
+            }}
           />
         )}
         {showEditor ? (
@@ -88,13 +134,14 @@ export default function AppShell() {
             initialPageId={activeTab.activePageId}
             onPageChange={handlePageChange}
             onHistoryChange={handleHistoryChange}
-            sidebarOpen={sidebarOpen}
-            onToggleSidebar={() => setSidebarOpen((v) => !v)}
+            onSelectionChange={setHasSelection}
+            pageStripVisible={pageStripVisible}
           />
         ) : (
           <HomeView onOpenNotebook={openNotebook} />
         )}
       </div>
+
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );
