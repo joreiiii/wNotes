@@ -49,13 +49,41 @@ läuft – der Desktop-Loop ist der schnellste Weg, Features zu testen.
 
 ### Android
 
-Voraussetzungen: Android SDK + NDK, `ANDROID_HOME`/`NDK_HOME` gesetzt, Java 17+.
+Erfolgreich gebaut und auf Gerät installierbar. Voraussetzungen: Java 17+, Android SDK + NDK.
 
 ```bash
-npm run tauri android init   # einmalig: generiert das Android-Projekt in src-tauri/gen/android
-npm run tauri android dev    # Live-Reload auf Emulator/Gerät
-npm run tauri android build  # signiertes/unsigniertes APK bzw. AAB
+./scripts/setup-android.sh              # installiert SDK, NDK und die Rust-Android-Targets
+export ANDROID_HOME="$HOME/Android/sdk"
+export NDK_HOME="$ANDROID_HOME/ndk/26.3.11579264"
+
+npm run tauri android build --apk --target aarch64   # arm64, deckt aktuelle Geräte ab
 ```
+
+Das Android-Projekt unter `src-tauri/gen/android` ist eingecheckt; `tauri android init` ist
+also nur nötig, wenn es neu erzeugt werden soll.
+
+**Netzwerkzugriff:** Der Build lädt von `dl.google.com` — sowohl das SDK als auch das
+Android-Gradle-Plugin, das Gradle aus Googles Maven-Repo zieht. Es gibt dafür keine
+Alternative: Maven Central führt `com.android.tools.build:gradle` nur bis 2.3.0, das Gradle
+Plugin Portal leitet dorthin weiter, und `maven.google.com` ist bloß ein Redirect auf
+`dl.google.com`. In abgeschotteten Umgebungen muss dieser Host also freigegeben sein.
+
+**Signieren:** `android build` liefert eine *unsignierte* Release-APK, die sich so nicht
+installieren lässt. Zum Testen:
+
+```bash
+BT="$ANDROID_HOME/build-tools/34.0.0"
+APK=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+
+keytool -genkeypair -keystore test.jks -alias wnotes -keyalg RSA -keysize 2048 \
+  -validity 10000 -storepass "$PW" -keypass "$PW" -dname "CN=wNotes Test"
+"$BT/zipalign" -p -f 4 "$APK" aligned.apk
+"$BT/apksigner" sign --ks test.jks --ks-key-alias wnotes \
+  --ks-pass "pass:$PW" --key-pass "pass:$PW" --out wnotes.apk aligned.apk
+```
+
+Für eine echte Veröffentlichung gehört ein eigener, dauerhaft aufbewahrter Schlüssel her —
+geht der verloren, lässt sich eine installierte App nicht mehr aktualisieren.
 
 ### iOS
 
@@ -73,6 +101,15 @@ npm run tauri ios build   # Release-Build/Archiv für TestFlight/App Store
 
 Bundle-Identifier ist `com.j0reiiimc.wnotes` (in `src-tauri/tauri.conf.json`), vor einem echten
 Store-Release ggf. anpassen und ein Apple-Developer-Team in Xcode hinterlegen.
+
+## Build-Status
+
+| Ziel | Stand |
+| --- | --- |
+| Desktop (Linux) | läuft, für die Entwicklung genutzt |
+| Android arm64 | **APK gebaut, signiert, 13,8 MB** |
+| Android x86_64 (Emulator) | nicht gebaut, sollte mit `--target x86_64` funktionieren |
+| iOS | nur konfiguriert — Build erfordert macOS + Xcode |
 
 ## Bekannte Einschränkungen dieser Version
 
