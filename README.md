@@ -111,11 +111,24 @@ Store-Release ggf. anpassen und ein Apple-Developer-Team in Xcode hinterlegen.
 | Android x86_64 (Emulator) | nicht gebaut, sollte mit `--target x86_64` funktionieren |
 | iOS | nur konfiguriert — Build erfordert macOS + Xcode |
 
+## Schrift und Lizenzen
+
+Die Oberfläche nutzt **Outfit** (SIL Open Font License 1.1, © 2021 The Outfit Project Authors).
+Die Schriftdateien liegen unter `src/assets/fonts/` samt Lizenztext `OFL.txt` und werden lokal
+eingebettet statt über ein CDN geladen — die App muss offline funktionieren.
+
+Gewünscht war ursprünglich Google Product Sans. Die trägt Googles `googlerestricted`-Lizenz
+(„Google offers many fonts under open source licenses. This is not one of them.") und ist auf
+Google-Produkte beschränkt, darf also nicht mitausgeliefert werden. Outfit ist die nächstliegende
+frei lizenzierte Entsprechung: geometrisch, einstöckiges „a", kreisrunde Formen.
+
+Icons: [Lucide](https://lucide.dev) (ISC).
+
 ## Bekannte Einschränkungen dieser Version
 
 - Radierer ist ein Strich-Radierer (entfernt ganze Striche), kein Pixel-Radierer mit
   Geometrie-Splitting.
 - Seiten-Reorder in der Thumbnail-Leiste erfolgt über Auf/Ab-Buttons, kein Drag & Drop.
-- Bibliotheks-Dialoge (Ordner/Notizbuch anlegen/umbenennen/löschen) nutzen einfache native
-  Prompts statt eigener UI-Modals.
 - Kein Cloud-Sync/Kollaboration/Handschrifterkennung/Suche/Export – siehe Scope oben.
+- Stift- und Mehrfinger-Gesten (Palm Rejection, Zwei-Finger-Scrollen bei aktivem Stift) sind nur
+  gegen Maus und synthetische Events geprüft, nicht auf echter Hardware mit Stylus.

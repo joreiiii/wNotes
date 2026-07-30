@@ -28,6 +28,8 @@ const MARKER_ALPHA = 0.35;
  * blue, to match the neutral chrome, but still distinct from ink on cream.
  */
 const SELECT_COLOR = 0x5a6270;
+/** Keeps text drawn on the sheet in the same face as the rest of the app. */
+const TEXT_FONT_FAMILY = "Outfit, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif";
 const ERASER_RADIUS = 14;
 const PALM_REJECTION_WINDOW_MS = 1000;
 /** Vertical gap between sheets, in page units. */
@@ -876,7 +878,7 @@ export class PageEngine {
       rotation: 0,
       text: "",
       fontSize: 24,
-      fontFamily: "system-ui, sans-serif",
+      fontFamily: TEXT_FONT_FAMILY,
       color: this.color,
     };
     this.history.push({
