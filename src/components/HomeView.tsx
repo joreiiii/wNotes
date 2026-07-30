@@ -1,12 +1,13 @@
 import { useEffect } from "react";
-import { Folder, FolderPlus, NotebookPen, Plus } from "lucide-react";
+import { Folder, FolderPlus, NotebookPen, Plus, Settings } from "lucide-react";
 import { useLibraryStore } from "../state/libraryStore";
 
 export interface HomeViewProps {
   onOpenNotebook: (notebookId: string, title: string) => void;
+  onOpenSettings: () => void;
 }
 
-export default function HomeView({ onOpenNotebook }: HomeViewProps) {
+export default function HomeView({ onOpenNotebook, onOpenSettings }: HomeViewProps) {
   const { index, currentFolderId, loading, refresh, setCurrentFolder, createFolder, createNotebook, renameFolder, renameNotebook, deleteFolder, deleteNotebook } =
     useLibraryStore();
 
@@ -48,6 +49,9 @@ export default function HomeView({ onOpenNotebook }: HomeViewProps) {
           }}
         >
           <Plus size={16} /> Notizbuch
+        </button>
+        <button className="icon-btn" onClick={onOpenSettings} aria-label="Einstellungen" title="Einstellungen">
+          <Settings size={20} />
         </button>
       </div>
 

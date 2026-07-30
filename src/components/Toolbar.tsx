@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
   Lasso,
   LayoutGrid,
+  Maximize2,
   Pen,
   PanelLeft,
   Plus,
@@ -26,6 +27,7 @@ export interface ToolbarProps {
   pageStripVisible: boolean;
   onTogglePageStrip: () => void;
   onSearch: () => void;
+  onFitWidth: () => void;
   tool: ToolId;
   onToolChange: (tool: ToolId) => void;
   color: string;
@@ -187,6 +189,9 @@ export default function Toolbar(props: ToolbarProps) {
       )}
 
       <div className="toolbar-group toolbar-group-boxed">
+        <button className="icon-btn" onClick={props.onFitWidth} aria-label="Breite einpassen" title="Breite einpassen">
+          <Maximize2 size={ICON} />
+        </button>
         <button className="icon-btn" onClick={props.onImportPdf} aria-label="PDF importieren" title="PDF importieren">
           <FileUp size={ICON} />
         </button>

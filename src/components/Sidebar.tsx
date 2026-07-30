@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, Folder, FolderPlus, NotebookPen, Redo2, Search, Settings, Undo2 } from "lucide-react";
+import { ChevronRight, Folder, FolderPlus, NotebookPen, Redo2, Search, Settings, Undo2, X } from "lucide-react";
 import { useLibraryStore } from "../state/libraryStore";
 
 export interface SidebarProps {
@@ -10,6 +10,9 @@ export interface SidebarProps {
   onUndo: () => void;
   onRedo: () => void;
   registerSearchFocus?: (focus: () => void) => void;
+  /** Overlays the canvas on narrow screens instead of taking a column. */
+  floating?: boolean;
+  onClose?: () => void;
 }
 
 export default function Sidebar({
@@ -20,6 +23,8 @@ export default function Sidebar({
   onUndo,
   onRedo,
   registerSearchFocus,
+  floating = false,
+  onClose,
 }: SidebarProps) {
   const { index, currentFolderId, refresh, setCurrentFolder, createFolder } = useLibraryStore();
   const [query, setQuery] = useState("");
@@ -43,15 +48,22 @@ export default function Sidebar({
   const filteredNotebooks = q ? notebooks.filter((n) => n.title.toLowerCase().includes(q)) : notebooks;
 
   return (
-    <aside className="sidebar">
+    <aside className={"sidebar" + (floating ? " floating" : "")}>
       <div className="sidebar-panel sidebar-panel-main">
-        <div className="sidebar-history">
-          <button className="icon-btn" disabled={!canUndo} onClick={onUndo} aria-label="Rückgängig">
-            <Undo2 size={20} />
-          </button>
-          <button className="icon-btn" disabled={!canRedo} onClick={onRedo} aria-label="Wiederholen">
-            <Redo2 size={20} />
-          </button>
+        <div className="sidebar-top-row">
+          <div className="sidebar-history">
+            <button className="icon-btn" disabled={!canUndo} onClick={onUndo} aria-label="Rückgängig">
+              <Undo2 size={20} />
+            </button>
+            <button className="icon-btn" disabled={!canRedo} onClick={onRedo} aria-label="Wiederholen">
+              <Redo2 size={20} />
+            </button>
+          </div>
+          {floating && (
+            <button className="icon-btn" onClick={onClose} aria-label="Seitenleiste schließen">
+              <X size={20} />
+            </button>
+          )}
         </div>
 
         <div className="sidebar-search">

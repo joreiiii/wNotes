@@ -8,6 +8,7 @@ import SettingsPanel from "./SettingsPanel";
 import { useTabsStore } from "../state/tabsStore";
 import { useSettingsStore } from "../state/settingsStore";
 import { useToolStore } from "../state/toolStore";
+import { useLayout } from "../state/useLayout";
 
 export default function AppShell() {
   const tabs = useTabsStore((s) => s.tabs);
@@ -17,6 +18,7 @@ export default function AppShell() {
   const setTabPage = useTabsStore((s) => s.setTabPage);
 
   const theme = useSettingsStore((s) => s.theme);
+  const layout = useLayout();
 
   const tool = useToolStore((s) => s.tool);
   const color = useToolStore((s) => s.color);
@@ -28,7 +30,8 @@ export default function AppShell() {
   const setShapeMode = useToolStore((s) => s.setShapeMode);
 
   const [showHome, setShowHome] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // On a phone the sidebar covers the canvas, so it starts closed there.
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 820);
   const [pageStripVisible, setPageStripVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
@@ -42,14 +45,25 @@ export default function AppShell() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  // Growing past the breakpoint reveals the column layout; shrinking below it
+  // should not leave an overlay covering the whole canvas.
+  const wasNarrow = useRef(layout.isNarrow);
+  useEffect(() => {
+    if (wasNarrow.current !== layout.isNarrow) {
+      setSidebarOpen(!layout.isNarrow);
+      wasNarrow.current = layout.isNarrow;
+    }
+  }, [layout.isNarrow]);
+
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
 
   const openNotebook = useCallback(
     (notebookId: string, title: string) => {
       openNotebookTab(notebookId, title);
       setShowHome(false);
+      if (layout.isNarrow) setSidebarOpen(false);
     },
-    [openNotebookTab],
+    [openNotebookTab, layout.isNarrow],
   );
 
   const handleSelectTab = useCallback(
@@ -73,9 +87,11 @@ export default function AppShell() {
   );
 
   const showEditor = !showHome && !!activeTab;
+  // The sidebar belongs to the document view; the home screen has its own nav.
+  const showSidebar = sidebarOpen && showEditor;
 
   return (
-    <div className="app-shell">
+    <div className={"app-shell" + (layout.isCompact ? " compact" : "")}>
       <TabBar
         onHome={() => setShowHome(true)}
         onAddTab={() => setShowHome(true)}
@@ -93,6 +109,7 @@ export default function AppShell() {
             setSidebarOpen(true);
             requestAnimationFrame(() => searchFocusRef.current?.());
           }}
+          onFitWidth={() => editorRef.current?.fitWidth()}
           tool={tool}
           onToolChange={setTool}
           color={color}
@@ -112,19 +129,26 @@ export default function AppShell() {
         />
       )}
 
-      <div className="app-shell-body">
-        {sidebarOpen && (
-          <Sidebar
-            onOpenNotebook={openNotebook}
-            onOpenSettings={() => setSettingsOpen(true)}
-            canUndo={canUndo}
-            canRedo={canRedo}
-            onUndo={() => editorRef.current?.undo()}
-            onRedo={() => editorRef.current?.redo()}
-            registerSearchFocus={(fn) => {
-              searchFocusRef.current = fn;
-            }}
-          />
+      <div className={"app-shell-body" + (showSidebar && layout.isNarrow ? " sidebar-overlaid" : "")}>
+        {showSidebar && (
+          <>
+            {layout.isNarrow && (
+              <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+            )}
+            <Sidebar
+              floating={layout.isNarrow}
+              onClose={() => setSidebarOpen(false)}
+              onOpenNotebook={openNotebook}
+              onOpenSettings={() => setSettingsOpen(true)}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              onUndo={() => editorRef.current?.undo()}
+              onRedo={() => editorRef.current?.redo()}
+              registerSearchFocus={(fn) => {
+                searchFocusRef.current = fn;
+              }}
+            />
+          </>
         )}
         {showEditor ? (
           <EditorView
@@ -138,7 +162,7 @@ export default function AppShell() {
             pageStripVisible={pageStripVisible}
           />
         ) : (
-          <HomeView onOpenNotebook={openNotebook} />
+          <HomeView onOpenNotebook={openNotebook} onOpenSettings={() => setSettingsOpen(true)} />
         )}
       </div>
 

@@ -11,7 +11,7 @@ import { createBlankPage, createPdfPages } from "../engine/pageFactory";
 import { loadPdfDocument, renderPdfPageToCanvas } from "../engine/pdf/pdfRender";
 import { loadImageElement } from "../engine/imageLoad";
 import { useToolStore } from "../state/toolStore";
-import type { NotebookManifest, PageTemplateKind, SelectionRef } from "../types";
+import type { NotebookManifest, PageData, PageTemplateKind, SelectionRef } from "../types";
 
 export interface EditorViewProps {
   notebookId: string;
@@ -22,7 +22,7 @@ export interface EditorViewProps {
   pageStripVisible: boolean;
 }
 
-/** Imperative surface the shell's full-width toolbar drives. */
+/** Imperative surface the shell's toolbar drives. */
 export interface EditorViewHandle {
   undo: () => void;
   redo: () => void;
@@ -33,6 +33,7 @@ export interface EditorViewHandle {
   addPage: () => void;
   importPdf: () => void;
   importImage: () => void;
+  fitWidth: () => void;
 }
 
 const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function EditorView(
@@ -42,9 +43,12 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
   const containerRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<PageEngine | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const dirtyPagesRef = useRef<Set<string>>(new Set());
+  const manifestRef = useRef<NotebookManifest | null>(null);
+  const initialPageRef = useRef(initialPageId);
 
   const [manifest, setManifest] = useState<NotebookManifest | null>(null);
-  const [pageId, setPageId] = useState<string | null>(initialPageId);
+  const [visiblePageId, setVisiblePageId] = useState<string | null>(initialPageId);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [textEditTarget, setTextEditTarget] = useState<TextEditTarget | null>(null);
 
@@ -53,6 +57,8 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
   const width = useToolStore((s) => s.width);
   const shapeMode = useToolStore((s) => s.shapeMode);
 
+  // Callbacks are read through refs so the engine effect depends only on the
+  // notebook — the engine must survive page add/delete without a remount.
   const onPageChangeRef = useRef(onPageChange);
   onPageChangeRef.current = onPageChange;
   const onHistoryChangeRef = useRef(onHistoryChange);
@@ -60,80 +66,96 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
 
-  // Load the notebook manifest once.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const m = await commands.getNotebookManifest(notebookId);
-      if (cancelled) return;
-      setManifest(m);
-      setPageId((current) => current ?? m.pageOrder[0] ?? null);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [notebookId]);
-
-  useEffect(() => {
-    if (pageId) onPageChangeRef.current(pageId);
-    // Intentionally only reacts to pageId changes — the callback's identity can
-    // churn on unrelated parent re-renders and must not re-trigger this.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageId]);
-
-  const scheduleSave = useCallback(() => {
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(async () => {
+  const refreshThumbnail = useCallback(
+    async (pageId: string) => {
       const engine = engineRef.current;
       if (!engine) return;
-      const data = engine.getPageData();
-      await commands.savePage(notebookId, data.id, data);
       try {
-        const thumb = await engine.exportThumbnail();
-        const url = URL.createObjectURL(new Blob([thumb], { type: "image/png" }));
+        const bytes = await engine.exportThumbnail(pageId);
+        const url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
         setThumbnails((prev) => {
-          const old = prev[data.id];
+          const old = prev[pageId];
           if (old) URL.revokeObjectURL(old);
-          return { ...prev, [data.id]: url };
+          return { ...prev, [pageId]: url };
         });
-        await commands.saveThumbnail(notebookId, data.id, thumb);
+        await commands.saveThumbnail(notebookId, pageId, bytes);
       } catch (err) {
         console.error("thumbnail export failed", err);
       }
-    }, 500);
-  }, [notebookId]);
+    },
+    [notebookId],
+  );
 
-  // Mount/unmount the PageEngine whenever the active page changes.
+  /** Debounced flush of every page touched since the last save. */
+  const scheduleSave = useCallback(
+    (pageId: string) => {
+      dirtyPagesRef.current.add(pageId);
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = window.setTimeout(async () => {
+        const engine = engineRef.current;
+        if (!engine) return;
+        const ids = Array.from(dirtyPagesRef.current);
+        dirtyPagesRef.current.clear();
+        for (const id of ids) {
+          const data = engine.getPageData(id);
+          if (!data) continue;
+          await commands.savePage(notebookId, id, data);
+          await refreshThumbnail(id);
+        }
+      }, 500);
+    },
+    [notebookId, refreshThumbnail],
+  );
+
+  // Create the engine once per notebook and feed it every page.
   useEffect(() => {
-    if (!pageId || !containerRef.current) return;
     let disposed = false;
+    const el = containerRef.current;
+    if (!el) return;
 
     (async () => {
-      const data = await commands.getPage(notebookId, pageId);
-      if (disposed || !containerRef.current) return;
+      const m = await commands.getNotebookManifest(notebookId);
+      if (disposed) return;
+      manifestRef.current = m;
+      setManifest(m);
+
+      const pages: PageData[] = [];
+      for (const id of m.pageOrder) {
+        try {
+          pages.push(await commands.getPage(notebookId, id));
+        } catch (err) {
+          console.error(`failed to load page ${id}`, err);
+        }
+      }
+      if (disposed) return;
 
       const engine = new PageEngine({
-        container: containerRef.current,
-        page: data,
+        container: el,
+        pages,
         onChange: scheduleSave,
         onSelectionChange: (sel: SelectionRef[]) => onSelectionChangeRef.current(sel.length > 0),
         onRequestTextEdit: (obj, screenX, screenY) => {
-          const rect = containerRef.current!.getBoundingClientRect();
+          const rect = el.getBoundingClientRect();
           setTextEditTarget({
             obj,
             screenX: screenX - rect.left,
             screenY: screenY - rect.top,
-            scale: engineRef.current?.viewport.scale.x ?? 1,
+            scale: engineRef.current?.getViewportScale() ?? 1,
           });
         },
-        onViewportChange: () => {},
+        onVisiblePageChange: (pageId) => {
+          setVisiblePageId(pageId);
+          onPageChangeRef.current(pageId);
+        },
       });
       engineRef.current = engine;
       await engine.whenReady();
       if (disposed) {
         engine.destroy();
+        engineRef.current = null;
         return;
       }
+
       engine.history.setOnChange(() => {
         onHistoryChangeRef.current(engine.history.canUndo(), engine.history.canRedo());
       });
@@ -144,24 +166,18 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
       engine.setWidth(width);
       engine.setShapeMode(shapeMode);
 
-      if (data.pdfRef) {
-        try {
-          const bytes = await commands.readAsset(notebookId, data.pdfRef.assetFile);
-          const pdf = await loadPdfDocument(bytes);
-          const canvas = await renderPdfPageToCanvas(pdf, data.pdfRef.pageNumber);
-          if (!disposed) engine.setPdfBackground(canvas);
-        } catch (err) {
-          console.error("failed to render pdf background", err);
-        }
+      // Restore the page the tab was last on.
+      if (initialPageRef.current && m.pageOrder.includes(initialPageRef.current)) {
+        engine.scrollToPage(initialPageRef.current);
+        setVisiblePageId(initialPageRef.current);
+      } else if (m.pageOrder[0]) {
+        setVisiblePageId(m.pageOrder[0]);
       }
-      for (const imageObj of data.imageObjects) {
-        try {
-          const bytes = await commands.readAsset(notebookId, imageObj.assetFile);
-          const img = await loadImageElement(bytes);
-          if (!disposed) engine.registerLoadedImageTexture(imageObj.id, Texture.from(img));
-        } catch (err) {
-          console.error("failed to load image object", err);
-        }
+
+      await loadPageAssets(engine, notebookId, pages, () => disposed);
+      for (const page of pages) {
+        if (disposed) return;
+        await refreshThumbnail(page.id);
       }
     })();
 
@@ -171,83 +187,115 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
       engineRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notebookId, pageId, scheduleSave]);
+  }, [notebookId]);
 
   useEffect(() => engineRef.current?.setTool(tool), [tool]);
   useEffect(() => engineRef.current?.setColor(color), [color]);
   useEffect(() => engineRef.current?.setWidth(width), [width]);
   useEffect(() => engineRef.current?.setShapeMode(shapeMode), [shapeMode]);
 
-  const updateManifest = useCallback(async (next: NotebookManifest) => {
-    setManifest(next);
-    await commands.saveNotebookManifest(next);
-  }, []);
+  /** Persists a new page order and hands the updated page set to the engine. */
+  const applyManifest = useCallback(
+    async (next: NotebookManifest, opts: { scrollTo?: string } = {}) => {
+      manifestRef.current = next;
+      setManifest(next);
+      await commands.saveNotebookManifest(next);
+
+      const engine = engineRef.current;
+      if (!engine) return;
+      const pages: PageData[] = [];
+      for (const id of next.pageOrder) {
+        const existing = engine.getPageData(id);
+        pages.push(existing ?? (await commands.getPage(notebookId, id)));
+      }
+      engine.setPages(pages);
+      await loadPageAssets(engine, notebookId, pages, () => false);
+      if (opts.scrollTo) {
+        engine.scrollToPage(opts.scrollTo);
+        setVisiblePageId(opts.scrollTo);
+      }
+    },
+    [notebookId],
+  );
 
   const handleAddPage = useCallback(
     async (templateKind?: PageTemplateKind) => {
-      if (!manifest) return;
+      const m = manifestRef.current;
+      const engine = engineRef.current;
+      if (!m || !engine) return;
+      const anchorId = visiblePageId ?? m.pageOrder[m.pageOrder.length - 1];
       const template = templateKind
         ? { kind: templateKind }
-        : (engineRef.current?.getPageData().template ?? { kind: "grid" as const });
+        : (engine.getPageData(anchorId)?.template ?? { kind: "grid" as const });
       const page = createBlankPage(template);
       await commands.savePage(notebookId, page.id, page);
-      const idx = manifest.pageOrder.indexOf(pageId ?? "");
-      const pageOrder = [...manifest.pageOrder];
-      pageOrder.splice(idx + 1, 0, page.id);
-      await updateManifest({ ...manifest, pageOrder, modifiedAt: new Date().toISOString() });
-      setPageId(page.id);
+
+      const pageOrder = [...m.pageOrder];
+      const idx = pageOrder.indexOf(anchorId);
+      pageOrder.splice(idx < 0 ? pageOrder.length : idx + 1, 0, page.id);
+      await applyManifest({ ...m, pageOrder, modifiedAt: new Date().toISOString() }, { scrollTo: page.id });
+      await refreshThumbnail(page.id);
     },
-    [manifest, notebookId, pageId, updateManifest],
+    [notebookId, visiblePageId, applyManifest, refreshThumbnail],
   );
 
   const handleDeletePage = useCallback(
     async (id: string) => {
-      if (!manifest || manifest.pageOrder.length <= 1) return;
-      const idx = manifest.pageOrder.indexOf(id);
-      const pageOrder = manifest.pageOrder.filter((p) => p !== id);
+      const m = manifestRef.current;
+      if (!m || m.pageOrder.length <= 1) return;
+      const idx = m.pageOrder.indexOf(id);
+      const pageOrder = m.pageOrder.filter((p) => p !== id);
       await commands.deletePage(notebookId, id);
-      await updateManifest({ ...manifest, pageOrder, modifiedAt: new Date().toISOString() });
-      if (id === pageId) {
-        setPageId(pageOrder[Math.max(0, idx - 1)] ?? pageOrder[0] ?? null);
-      }
+      const scrollTo = pageOrder[Math.max(0, idx - 1)] ?? pageOrder[0];
+      await applyManifest({ ...m, pageOrder, modifiedAt: new Date().toISOString() }, { scrollTo });
+      setThumbnails((prev) => {
+        const next = { ...prev };
+        if (next[id]) URL.revokeObjectURL(next[id]);
+        delete next[id];
+        return next;
+      });
     },
-    [manifest, notebookId, pageId, updateManifest],
+    [notebookId, applyManifest],
   );
 
   const handleMove = useCallback(
     async (id: string, dir: -1 | 1) => {
-      if (!manifest) return;
-      const idx = manifest.pageOrder.indexOf(id);
+      const m = manifestRef.current;
+      if (!m) return;
+      const idx = m.pageOrder.indexOf(id);
       const swapWith = idx + dir;
-      if (swapWith < 0 || swapWith >= manifest.pageOrder.length) return;
-      const pageOrder = [...manifest.pageOrder];
+      if (swapWith < 0 || swapWith >= m.pageOrder.length) return;
+      const pageOrder = [...m.pageOrder];
       [pageOrder[idx], pageOrder[swapWith]] = [pageOrder[swapWith], pageOrder[idx]];
-      await updateManifest({ ...manifest, pageOrder, modifiedAt: new Date().toISOString() });
+      await applyManifest({ ...m, pageOrder, modifiedAt: new Date().toISOString() }, { scrollTo: id });
     },
-    [manifest, updateManifest],
+    [applyManifest],
   );
 
   const handleImportPdf = useCallback(async () => {
-    if (!manifest) return;
+    const m = manifestRef.current;
+    if (!m) return;
     const path = await open({ multiple: false, filters: [{ name: "PDF", extensions: ["pdf"] }] });
     if (!path || typeof path !== "string") return;
     const bytes = await readFile(path);
     const fileName = path.split(/[\\/]/).pop() ?? "document.pdf";
     const storedName = await commands.importAsset(notebookId, fileName, bytes);
     const pages = await createPdfPages(storedName, bytes);
-    for (const page of pages) {
-      await commands.savePage(notebookId, page.id, page);
-    }
-    const idx = manifest.pageOrder.indexOf(pageId ?? "");
-    const pageOrder = [...manifest.pageOrder];
-    pageOrder.splice(idx + 1, 0, ...pages.map((p) => p.id));
-    await updateManifest({ ...manifest, pageOrder, modifiedAt: new Date().toISOString() });
-    if (pages[0]) setPageId(pages[0].id);
-  }, [manifest, notebookId, pageId, updateManifest]);
+    for (const page of pages) await commands.savePage(notebookId, page.id, page);
+
+    const pageOrder = [...m.pageOrder];
+    const idx = pageOrder.indexOf(visiblePageId ?? "");
+    pageOrder.splice(idx < 0 ? pageOrder.length : idx + 1, 0, ...pages.map((p) => p.id));
+    await applyManifest(
+      { ...m, pageOrder, modifiedAt: new Date().toISOString() },
+      { scrollTo: pages[0]?.id },
+    );
+    for (const p of pages) await refreshThumbnail(p.id);
+  }, [notebookId, visiblePageId, applyManifest, refreshThumbnail]);
 
   const handleImportImage = useCallback(async () => {
     const engine = engineRef.current;
-    if (!engine) return;
+    if (!engine || !visiblePageId) return;
     const path = await open({
       multiple: false,
       filters: [{ name: "Bild", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
@@ -256,8 +304,8 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
     const bytes = await readFile(path);
     const fileName = path.split(/[\\/]/).pop() ?? "image.png";
     const storedName = await commands.importAsset(notebookId, fileName, bytes);
-    await engine.addImageObjectFromBytes(bytes, storedName);
-  }, [notebookId]);
+    await engine.addImageObjectFromBytes(visiblePageId, bytes, storedName);
+  }, [notebookId, visiblePageId]);
 
   useImperativeHandle(ref, () => ({
     undo: () => engineRef.current?.history.undo(),
@@ -269,6 +317,7 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
     addPage: () => handleAddPage(),
     importPdf: () => handleImportPdf(),
     importImage: () => handleImportImage(),
+    fitWidth: () => engineRef.current?.fitWidth(),
   }));
 
   const thumbnailEntries: ThumbnailEntry[] = (manifest?.pageOrder ?? []).map((id) => ({
@@ -291,8 +340,11 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
       {pageStripVisible && (
         <PageThumbnailStrip
           pages={thumbnailEntries}
-          currentPageId={pageId}
-          onSelect={setPageId}
+          currentPageId={visiblePageId}
+          onSelect={(id) => {
+            engineRef.current?.scrollToPage(id);
+            setVisiblePageId(id);
+          }}
           onDelete={handleDeletePage}
           onMoveUp={(id) => handleMove(id, -1)}
           onMoveDown={(id) => handleMove(id, 1)}
@@ -302,5 +354,36 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
     </div>
   );
 });
+
+/** Loads PDF backgrounds and image textures for pages that reference assets. */
+async function loadPageAssets(
+  engine: PageEngine,
+  notebookId: string,
+  pages: PageData[],
+  cancelled: () => boolean,
+): Promise<void> {
+  for (const page of pages) {
+    if (cancelled()) return;
+    if (page.pdfRef) {
+      try {
+        const bytes = await commands.readAsset(notebookId, page.pdfRef.assetFile);
+        const pdf = await loadPdfDocument(bytes);
+        const canvas = await renderPdfPageToCanvas(pdf, page.pdfRef.pageNumber);
+        if (!cancelled()) engine.setPdfBackground(page.id, canvas);
+      } catch (err) {
+        console.error("failed to render pdf background", err);
+      }
+    }
+    for (const imageObj of page.imageObjects) {
+      try {
+        const bytes = await commands.readAsset(notebookId, imageObj.assetFile);
+        const img = await loadImageElement(bytes);
+        if (!cancelled()) engine.registerLoadedImageTexture(page.id, imageObj.id, Texture.from(img));
+      } catch (err) {
+        console.error("failed to load image object", err);
+      }
+    }
+  }
+}
 
 export default EditorView;
