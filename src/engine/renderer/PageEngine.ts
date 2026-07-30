@@ -20,8 +20,14 @@ import { applyAffineToPoint } from "../selection/transform";
 import { getClipboard, setClipboard } from "../selection/clipboard";
 import { drawTemplate } from "./templates";
 import { loadImageElement } from "../imageLoad";
+import { tween, type TweenHandle } from "../../lib/tween";
 
 const MARKER_ALPHA = 0.35;
+/**
+ * Selection affordances on the sheet. A muted slate rather than a saturated
+ * blue, to match the neutral chrome, but still distinct from ink on cream.
+ */
+const SELECT_COLOR = 0x5a6270;
 const ERASER_RADIUS = 14;
 const PALM_REJECTION_WINDOW_MS = 1000;
 /** Vertical gap between sheets, in page units. */
@@ -113,6 +119,7 @@ export class PageEngine {
   private pendingErase: { page: EnginePage; strokes: Stroke[] } | null = null;
   private lastReportedVisiblePage: string | null = null;
   private clamping = false;
+  private viewTween: TweenHandle | null = null;
 
   private onChange: (pageId: string) => void;
   private onSelectionChange: (sel: SelectionRef[]) => void;
@@ -332,12 +339,36 @@ export class PageEngine {
   };
 
   /** Sheet spans the viewport width; scrolling is vertical, as in the reference app. */
-  fitWidth() {
-    const scale = this.viewport.screenWidth / this.worldWidth;
-    this.viewport.scale.set(scale);
-    this.viewport.moveCorner(0, 0);
-    this.redrawMountedBackgrounds();
-    this.updateMountedPages();
+  fitWidth(opts: { animate?: boolean } = {}) {
+    const target = this.viewport.screenWidth / this.worldWidth;
+    this.viewTween?.cancel();
+
+    if (!opts.animate) {
+      this.viewport.scale.set(target);
+      this.viewport.moveCorner(0, 0);
+      this.redrawMountedBackgrounds();
+      this.updateMountedPages();
+      return;
+    }
+
+    const fromScale = this.viewport.scale.x;
+    const fromTop = this.viewport.top;
+    const fromLeft = this.viewport.left;
+    this.viewTween = tween({
+      duration: 340,
+      onUpdate: (t) => {
+        const scale = fromScale + (target - fromScale) * t;
+        this.viewport.scale.set(scale);
+        this.viewport.top = fromTop * (1 - t);
+        this.viewport.left = fromLeft * (1 - t);
+        this.clampView();
+        this.redrawMountedBackgrounds();
+        this.updateMountedPages();
+      },
+      onDone: () => {
+        this.viewTween = null;
+      },
+    });
   }
 
   // ---------- virtualization ----------
@@ -412,14 +443,43 @@ export class PageEngine {
     }
   }
 
-  /** Scrolls a page to the top of the viewport — what a thumbnail tap does. */
-  scrollToPage(pageId: string) {
+  /**
+   * Glides a page to the top of the viewport — what a thumbnail tap does.
+   * Animated rather than snapped so the jump between distant pages stays
+   * legible; `immediate` is used when restoring a saved position on open.
+   */
+  scrollToPage(pageId: string, opts: { immediate?: boolean } = {}) {
     const page = this.pages.find((p) => p.data.id === pageId);
     if (!page) return;
-    this.viewport.top = page.offsetY;
+    this.viewTween?.cancel();
     this.viewport.plugins.get("decelerate")?.reset();
-    this.updateMountedPages();
     this.lastReportedVisiblePage = pageId;
+
+    const from = this.viewport.top;
+    const to = page.offsetY;
+    if (opts.immediate || Math.abs(to - from) < 1) {
+      this.viewport.top = to;
+      this.clampView();
+      this.redrawMountedBackgrounds();
+      this.updateMountedPages();
+      return;
+    }
+
+    // Longer trips get a little more time, but never a sluggish amount.
+    const distanceScreens = Math.abs(to - from) / Math.max(this.viewport.screenHeightInWorldPixels, 1);
+    const duration = Math.min(620, 260 + distanceScreens * 120);
+    this.viewTween = tween({
+      duration,
+      onUpdate: (t) => {
+        this.viewport.top = from + (to - from) * t;
+        this.clampView();
+        this.updateMountedPages();
+      },
+      onDone: () => {
+        this.viewTween = null;
+        this.redrawMountedBackgrounds();
+      },
+    });
   }
 
   // ---------- background ----------
@@ -946,8 +1006,8 @@ export class PageEngine {
       for (const p of this.lassoPoints) flat.push(p.x, p.y);
       this.lassoGraphic
         .poly(flat)
-        .fill({ color: 0x3478f6, alpha: 0.12 })
-        .stroke({ width: 2 / this.viewport.scale.x, color: 0x3478f6 });
+        .fill({ color: SELECT_COLOR, alpha: 0.14 })
+        .stroke({ width: 2 / this.viewport.scale.x, color: SELECT_COLOR });
     }
     this.overlayLayer.addChild(this.lassoGraphic);
   }
@@ -1074,15 +1134,15 @@ export class PageEngine {
     const oy = page.offsetY;
     g.rect(ox + bounds.minX, oy + bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY).stroke({
       width: 2 * inv,
-      color: 0x3478f6,
+      color: SELECT_COLOR,
     });
     const handleSize = 10 * inv;
     this.scaleHandleWorld = { x: ox + bounds.maxX, y: oy + bounds.maxY };
     this.rotateHandleWorld = { x: ox + (bounds.minX + bounds.maxX) / 2, y: oy + bounds.minY - 24 * inv };
     g.rect(this.scaleHandleWorld.x - handleSize / 2, this.scaleHandleWorld.y - handleSize / 2, handleSize, handleSize).fill(
-      0x3478f6,
+      SELECT_COLOR,
     );
-    g.circle(this.rotateHandleWorld.x, this.rotateHandleWorld.y, handleSize / 2).fill(0x3478f6);
+    g.circle(this.rotateHandleWorld.x, this.rotateHandleWorld.y, handleSize / 2).fill(SELECT_COLOR);
     this.selectionBox = g;
     this.overlayLayer.addChild(g);
   }
@@ -1352,6 +1412,7 @@ export class PageEngine {
 
   destroy() {
     this.destroyed = true;
+    this.viewTween?.cancel();
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.app.canvas?.removeEventListener("wheel", this.onWheel);

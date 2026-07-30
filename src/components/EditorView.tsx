@@ -168,7 +168,7 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
 
       // Restore the page the tab was last on.
       if (initialPageRef.current && m.pageOrder.includes(initialPageRef.current)) {
-        engine.scrollToPage(initialPageRef.current);
+        engine.scrollToPage(initialPageRef.current, { immediate: true });
         setVisiblePageId(initialPageRef.current);
       } else if (m.pageOrder[0]) {
         setVisiblePageId(m.pageOrder[0]);
@@ -317,7 +317,7 @@ const EditorView = forwardRef<EditorViewHandle, EditorViewProps>(function Editor
     addPage: () => handleAddPage(),
     importPdf: () => handleImportPdf(),
     importImage: () => handleImportImage(),
-    fitWidth: () => engineRef.current?.fitWidth(),
+    fitWidth: () => engineRef.current?.fitWidth({ animate: true }),
   }));
 
   const thumbnailEntries: ThumbnailEntry[] = (manifest?.pageOrder ?? []).map((id) => ({

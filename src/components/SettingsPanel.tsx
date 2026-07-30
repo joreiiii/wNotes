@@ -3,6 +3,7 @@ import { useSettingsStore, type ThemePreference } from "../state/settingsStore";
 
 export interface SettingsPanelProps {
   onClose: () => void;
+  closing?: boolean;
 }
 
 const THEME_OPTIONS: { id: ThemePreference; label: string }[] = [
@@ -11,13 +12,13 @@ const THEME_OPTIONS: { id: ThemePreference; label: string }[] = [
   { id: "dark", label: "Dunkel" },
 ];
 
-export default function SettingsPanel({ onClose }: SettingsPanelProps) {
+export default function SettingsPanel({ onClose, closing = false }: SettingsPanelProps) {
   const theme = useSettingsStore((s) => s.theme);
   const setTheme = useSettingsStore((s) => s.setTheme);
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
+    <div className={"settings-overlay" + (closing ? " closing" : "")} onClick={onClose}>
+      <div className={"settings-panel" + (closing ? " closing" : "")} onClick={(e) => e.stopPropagation()}>
         <h2>Einstellungen</h2>
         <div>
           <div className="settings-group-label">Erscheinungsbild</div>

@@ -13,12 +13,22 @@
   --text-primary: #f2f2f5;
   --text-secondary: #96969f;
   --border: rgba(255, 255, 255, 0.07);
-  --accent: #0a84ff;
-  --accent-contrast: #ffffff;
+  /* No saturated accent in the chrome: emphasis is a raised neutral chip, the
+     same idiom as the selected tool. Blue read as generic web UI. */
+  --emphasis: #4a4a52;
+  --emphasis-strong: #5c5c66;
+  --focus-border: rgba(255, 255, 255, 0.28);
   --danger: #ff453a;
+  /* Selection outlines sit on cream paper, where grey would vanish. */
+  --ink-select: #6b6f78;
   --paper-bg: #f7f3e9;
   --canvas-surround: #1b1b1f;
   --radius-panel: 22px;
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --t-fast: 130ms;
+  --t-mid: 200ms;
+  --t-slow: 300ms;
   --radius-md: 14px;
   --radius-sm: 11px;
   --shadow-panel: 0 10px 30px rgba(0, 0, 0, 0.35);
@@ -37,8 +47,11 @@
   --text-primary: #17181c;
   --text-secondary: #6b6f78;
   --border: rgba(0, 0, 0, 0.08);
-  --accent: #0a6cf2;
+  --emphasis: #ccd1da;
+  --emphasis-strong: #b9c0cb;
+  --focus-border: rgba(0, 0, 0, 0.32);
   --danger: #d92b2b;
+  --ink-select: #6b6f78;
   --canvas-surround: #c9ccd3;
   --shadow-panel: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
@@ -57,8 +70,11 @@
     --text-primary: #17181c;
     --text-secondary: #6b6f78;
     --border: rgba(0, 0, 0, 0.08);
-    --accent: #0a6cf2;
+    --emphasis: #ccd1da;
+    --emphasis-strong: #b9c0cb;
+    --focus-border: rgba(0, 0, 0, 0.32);
     --danger: #d92b2b;
+    --ink-select: #6b6f78;
     --canvas-surround: #c9ccd3;
     --shadow-panel: 0 8px 24px rgba(0, 0, 0, 0.12);
   }
@@ -66,6 +82,13 @@
 
 * {
   box-sizing: border-box;
+  /* Removes the web fingerprint: no text selection, no blue tap flash, no
+     long-press callout, no draggable images. Inputs opt back in below. */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 html,
@@ -88,13 +111,55 @@ body {
 
 button {
   font-family: inherit;
-  cursor: pointer;
   color: inherit;
+  /* A pointer cursor and a focus ring are browser affordances; native apps
+     show neither. `manipulation` also suppresses double-tap zoom. */
+  cursor: default;
+  touch-action: manipulation;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+}
+
+button:focus,
+button:focus-visible {
+  outline: none;
 }
 
 input,
 textarea {
   font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+  /* Editable fields are the one place selection and a caret belong. */
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+img,
+canvas,
+svg {
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: auto;
+}
+
+/* Hide scrollbars everywhere while keeping the areas scrollable. */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+::selection {
+  background: rgba(128, 128, 128, 0.35);
 }
 
 /* ---------- Shared icon buttons ---------- */
@@ -590,7 +655,7 @@ textarea {
 
 .text-edit-overlay {
   position: absolute;
-  border: 1px dashed var(--accent);
+  border: 1px dashed var(--ink-select);
   background: rgba(255, 255, 255, 0.92);
   color: #17181c;
   padding: 4px;
@@ -625,7 +690,7 @@ textarea {
 }
 
 .page-thumb.active {
-  border-color: var(--accent);
+  border-color: var(--emphasis-strong);
 }
 
 .page-thumb img,
@@ -767,8 +832,8 @@ textarea {
 }
 
 .settings-theme-options button.active {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--emphasis);
+  color: var(--text-primary);
 }
 
 .settings-close {
@@ -965,5 +1030,384 @@ textarea {
     width: 24px;
     height: 24px;
     font-size: 12px;
+  }
+}
+
+/* ==========================================================================
+   Motion and native feel
+
+   Everything interactive gets a transition and a press response. Hover is
+   gated to real pointers — on a touchscreen a tapped element keeps its hover
+   state afterwards, which is one of the clearest signs of a web UI.
+   ========================================================================== */
+
+.icon-btn,
+.tool-btn,
+.tab,
+.tab-close,
+.tab-bar-home,
+.tab-bar-add,
+.sidebar-item,
+.sidebar-add-btn,
+.home-item,
+.page-thumb,
+.page-thumb-add,
+.template-picker button,
+.color-swatch,
+.color-trigger,
+.settings-theme-options button,
+.dialog-btn,
+.dialog-action {
+  transition:
+    background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    opacity var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+  will-change: transform;
+}
+
+/* Press feedback. Scale is subtle enough to feel physical, not bouncy. */
+.icon-btn:active,
+.tool-btn:active,
+.tab-close:active,
+.tab-bar-home:active,
+.tab-bar-add:active,
+.sidebar-add-btn:active,
+.template-picker button:active,
+.settings-theme-options button:active,
+.dialog-btn:active,
+.dialog-action:active {
+  transform: scale(0.9);
+  transition-duration: 60ms;
+}
+
+.tab:active,
+.sidebar-item:active,
+.home-item:active,
+.page-thumb:active,
+.page-thumb-add:active {
+  transform: scale(0.97);
+  transition-duration: 60ms;
+}
+
+.color-swatch:active,
+.color-trigger:active {
+  transform: scale(0.86);
+  transition-duration: 60ms;
+}
+
+/* The selected tool grows a touch as it takes over. */
+.icon-btn.active {
+  transform: scale(1.04);
+}
+
+.icon-btn.active:active {
+  transform: scale(0.94);
+}
+
+/* Neutralise hover on touch-only devices so taps leave nothing behind. */
+@media (hover: none) {
+  .icon-btn:hover,
+  .tab:hover,
+  .tab-close:hover,
+  .tab-bar-home:hover,
+  .tab-bar-add:hover,
+  .sidebar-item:hover,
+  .sidebar-add-btn:hover,
+  .home-item:hover,
+  .tool-btn:hover,
+  .template-picker button:hover,
+  .page-thumb-add:hover {
+    background: inherit;
+  }
+
+  .icon-btn.active:hover,
+  .tab.active:hover {
+    background: var(--bg-active);
+  }
+}
+
+/* ---------- entries and exits ---------- */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pop-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-22px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slide-out-left {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(-22px); }
+}
+
+@keyframes drop-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* View switch: home and editor cross-fade rather than snapping. */
+.home-view,
+.editor-surface {
+  animation: fade-in var(--t-slow) var(--ease) both;
+}
+
+/* Toolbar settles in from above when the editor opens. */
+.toolbar {
+  animation: drop-in var(--t-mid) var(--ease) both;
+}
+
+/* Tabs slide in as they are opened. */
+.tab {
+  animation: pop-in 180ms var(--ease-spring) both;
+}
+
+/* Library grid assembles with a stagger; delay is set inline per item. */
+.home-item.enter {
+  animation: rise-in 280ms var(--ease) both;
+}
+
+/* Sidebar. The column variant fades; the drawer slides. */
+.sidebar {
+  animation: fade-in var(--t-mid) var(--ease) both;
+}
+
+.sidebar.floating {
+  animation: slide-in-left 220ms var(--ease) both;
+}
+
+.sidebar.closing {
+  animation: fade-out var(--t-mid) var(--ease) both;
+}
+
+.sidebar.floating.closing {
+  animation: slide-out-left 190ms var(--ease) both;
+}
+
+.sidebar-backdrop {
+  animation: fade-in var(--t-mid) var(--ease) both;
+}
+
+.sidebar-backdrop.closing {
+  animation: fade-out var(--t-mid) var(--ease) both;
+}
+
+/* Popovers grow from their trigger edge. */
+.color-popover,
+.template-picker {
+  animation: pop-in 160ms var(--ease-spring) both;
+  transform-origin: top left;
+}
+
+.template-picker {
+  transform-origin: bottom left;
+}
+
+.template-picker button {
+  animation: rise-in 180ms var(--ease) both;
+}
+
+/* Page strip slides up from the bottom edge. */
+.page-strip {
+  animation: rise-in var(--t-mid) var(--ease) both;
+}
+
+/* Thumbnails fade in once their render arrives. */
+.page-thumb img {
+  animation: fade-in var(--t-slow) var(--ease) both;
+}
+
+/* Text overlay for editing appears in place. */
+.text-edit-overlay {
+  animation: pop-in 140ms var(--ease) both;
+}
+
+/* ---------- Settings ---------- */
+
+.settings-overlay {
+  animation: fade-in var(--t-mid) var(--ease) both;
+}
+
+.settings-overlay.closing {
+  animation: fade-out var(--t-mid) var(--ease) both;
+}
+
+.settings-panel {
+  animation: pop-in 240ms var(--ease-spring) both;
+}
+
+.settings-panel.closing {
+  animation: pop-out 180ms var(--ease) both;
+}
+
+/* ---------- Dialogs (replacing native prompt/confirm) ---------- */
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  animation: fade-in var(--t-mid) var(--ease) both;
+}
+
+.dialog-overlay.closing {
+  animation: fade-out 170ms var(--ease) both;
+}
+
+.dialog-panel {
+  width: min(380px, 100%);
+  padding: 22px;
+  border-radius: var(--radius-panel);
+  background: var(--bg-panel);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  animation: pop-in 240ms var(--ease-spring) both;
+}
+
+.dialog-panel.closing {
+  animation: pop-out 170ms var(--ease) both;
+}
+
+.dialog-title {
+  margin: 0 0 14px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.dialog-label,
+.dialog-message {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.dialog-input {
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  margin-bottom: 18px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 16px;
+  transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+}
+
+.dialog-input:focus {
+  border-color: var(--focus-border);
+  background: var(--bg-panel-2);
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.dialog-btn {
+  flex: 1;
+  height: 46px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.dialog-btn.primary {
+  background: var(--emphasis);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.dialog-btn.destructive {
+  background: var(--danger);
+  color: #fff;
+}
+
+.dialog-btn:disabled {
+  opacity: 0.4;
+}
+
+.dialog-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dialog-action {
+  height: 50px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 16px;
+  animation: rise-in 200ms var(--ease) both;
+}
+
+.dialog-action.destructive {
+  color: var(--danger);
+}
+
+.dialog-action.muted {
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+/* ---------- Reduced motion ----------
+   Honour the system preference: keep the states, drop the movement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .icon-btn.active,
+  .icon-btn:active,
+  .tool-btn:active,
+  .tab:active,
+  .home-item:active,
+  .sidebar-item:active,
+  .page-thumb:active,
+  .color-swatch:active,
+  .color-trigger:active,
+  .dialog-btn:active,
+  .dialog-action:active {
+    transform: none;
   }
 }

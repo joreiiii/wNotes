@@ -5,10 +5,13 @@ import Sidebar from "./Sidebar";
 import HomeView from "./HomeView";
 import EditorView, { type EditorViewHandle } from "./EditorView";
 import SettingsPanel from "./SettingsPanel";
+import DialogHost from "./DialogHost";
 import { useTabsStore } from "../state/tabsStore";
 import { useSettingsStore } from "../state/settingsStore";
 import { useToolStore } from "../state/toolStore";
 import { useLayout } from "../state/useLayout";
+import { useDismissable } from "../lib/useDismissable";
+import { useNativeFeel } from "../lib/useNativeFeel";
 
 export default function AppShell() {
   const tabs = useTabsStore((s) => s.tabs);
@@ -19,6 +22,7 @@ export default function AppShell() {
 
   const theme = useSettingsStore((s) => s.theme);
   const layout = useLayout();
+  useNativeFeel();
 
   const tool = useToolStore((s) => s.tool);
   const color = useToolStore((s) => s.color);
@@ -88,7 +92,8 @@ export default function AppShell() {
 
   const showEditor = !showHome && !!activeTab;
   // The sidebar belongs to the document view; the home screen has its own nav.
-  const showSidebar = sidebarOpen && showEditor;
+  const sidebar = useDismissable(sidebarOpen && showEditor, 200);
+  const settings = useDismissable(settingsOpen, 200);
 
   return (
     <div className={"app-shell" + (layout.isCompact ? " compact" : "")}>
@@ -129,13 +134,18 @@ export default function AppShell() {
         />
       )}
 
-      <div className={"app-shell-body" + (showSidebar && layout.isNarrow ? " sidebar-overlaid" : "")}>
-        {showSidebar && (
+      <div className={"app-shell-body" + (sidebar.render && layout.isNarrow ? " sidebar-overlaid" : "")}>
+        {sidebar.render && (
           <>
             {layout.isNarrow && (
-              <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+              <div
+                className={"sidebar-backdrop" + (sidebar.closing ? " closing" : "")}
+                onClick={() => setSidebarOpen(false)}
+                aria-hidden="true"
+              />
             )}
             <Sidebar
+              closing={sidebar.closing}
               floating={layout.isNarrow}
               onClose={() => setSidebarOpen(false)}
               onOpenNotebook={openNotebook}
@@ -166,7 +176,8 @@ export default function AppShell() {
         )}
       </div>
 
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {settings.render && <SettingsPanel closing={settings.closing} onClose={() => setSettingsOpen(false)} />}
+      <DialogHost />
     </div>
   );
 }

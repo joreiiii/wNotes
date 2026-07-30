@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Folder, FolderPlus, NotebookPen, Redo2, Search, Settings, Undo2, X } from "lucide-react";
 import { useLibraryStore } from "../state/libraryStore";
+import { promptText } from "../state/dialogStore";
 
 export interface SidebarProps {
   onOpenNotebook: (notebookId: string, title: string) => void;
@@ -13,6 +14,8 @@ export interface SidebarProps {
   /** Overlays the canvas on narrow screens instead of taking a column. */
   floating?: boolean;
   onClose?: () => void;
+  /** True while the exit animation plays. */
+  closing?: boolean;
 }
 
 export default function Sidebar({
@@ -25,6 +28,7 @@ export default function Sidebar({
   registerSearchFocus,
   floating = false,
   onClose,
+  closing = false,
 }: SidebarProps) {
   const { index, currentFolderId, refresh, setCurrentFolder, createFolder } = useLibraryStore();
   const [query, setQuery] = useState("");
@@ -48,7 +52,7 @@ export default function Sidebar({
   const filteredNotebooks = q ? notebooks.filter((n) => n.title.toLowerCase().includes(q)) : notebooks;
 
   return (
-    <aside className={"sidebar" + (floating ? " floating" : "")}>
+    <aside className={"sidebar" + (floating ? " floating" : "") + (closing ? " closing" : "")}>
       <div className="sidebar-panel sidebar-panel-main">
         <div className="sidebar-top-row">
           <div className="sidebar-history">
@@ -81,7 +85,11 @@ export default function Sidebar({
           <button
             className="sidebar-add-btn"
             onClick={async () => {
-              const title = window.prompt("Ordnername");
+              const title = await promptText({
+                title: "Neuer Ordner",
+                placeholder: "Name des Ordners",
+                confirmLabel: "Anlegen",
+              });
               if (title) await createFolder(title);
             }}
             aria-label="Ordner hinzufügen"
